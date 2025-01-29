@@ -218,6 +218,12 @@ pub fn parse(
           },
           field_type => unimplemented!(r#""flatten" is not implemented for {:?}"#, field_type),
         },
+        Field::FieldVec { data_type } => match *data_type {
+          Field::FieldStruct { .. } => quote! {
+            #value_label = ::yaserde::de::from_str(&unused_xml_elements)?;
+          },
+          field_type => unimplemented!(r#""flatten" is not implemented for {:?}"#, field_type),
+        },
         field_type => unimplemented!(r#""flatten" is not implemented for {:?}"#, field_type),
       }
     })
