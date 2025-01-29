@@ -290,6 +290,7 @@ fn default_visitor() {
   test_type!(visit_str, "Unexpected str \"\"");
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum XmlValue {
   Element {
     name: xml::name::OwnedName,
