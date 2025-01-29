@@ -290,6 +290,119 @@ fn default_visitor() {
   test_type!(visit_str, "Unexpected str \"\"");
 }
 
+pub enum XmlValue {
+  Element {
+    name: xml::name::OwnedName,
+    attributes: Vec<xml::attribute::OwnedAttribute>,
+    namespace: xml::namespace::Namespace,
+    children: Vec<XmlValue>,
+  },
+  CData(String),
+  Comment(String),
+  Characters(String),
+}
+
+impl YaSerialize for XmlValue {
+  fn serialize<W: Write>(&self, writer: &mut ser::Serializer<W>) -> Result<(), String> {
+    match self {
+      XmlValue::Element {
+        name,
+        attributes,
+        namespace,
+        children,
+      } => {
+        let mut element = XmlEvent::start_element(name.borrow());
+        for attribute in attributes.iter() {
+          element = element.attr(attribute.name.borrow(), &attribute.value);
+        }
+        for (prefix, uri) in namespace.iter() {
+          element = element.ns(prefix, uri);
+        }
+
+        writer.write(element).unwrap();
+        for child in children {
+          child.serialize(writer)?;
+        }
+        writer.write(XmlEvent::end_element()).unwrap();
+
+        Ok(())
+      }
+      XmlValue::CData(content) => {
+        writer.write(XmlEvent::cdata(content)).unwrap();
+        Ok(())
+      }
+      XmlValue::Comment(content) => {
+        writer.write(XmlEvent::comment(content)).unwrap();
+        Ok(())
+      }
+      XmlValue::Characters(content) => {
+        writer.write(XmlEvent::characters(content)).unwrap();
+        Ok(())
+      }
+    }
+  }
+
+  fn serialize_attributes(
+    &self,
+    mut orig_attributes: Vec<xml::attribute::OwnedAttribute>,
+    mut orig_namespace: xml::namespace::Namespace,
+  ) -> Result<
+    (
+      Vec<xml::attribute::OwnedAttribute>,
+      xml::namespace::Namespace,
+    ),
+    String,
+  > {
+    if let XmlValue::Element {
+      attributes,
+      namespace,
+      ..
+    } = self
+    {
+      orig_attributes.extend(attributes.iter().cloned());
+      orig_namespace.0.extend(namespace.0.clone());
+    }
+
+    Ok((orig_attributes, orig_namespace))
+  }
+}
+
+impl YaDeserialize for XmlValue {
+  fn deserialize<R: Read>(reader: &mut de::Deserializer<R>) -> Result<Self, String> {
+    match reader.next_event()? {
+      xml::reader::XmlEvent::StartElement {
+        name,
+        attributes,
+        namespace,
+      } => {
+        let mut children = Vec::new();
+        loop {
+          match reader.peek()? {
+            xml::reader::XmlEvent::EndElement { .. } => {
+              reader.next_event()?;
+              break Ok(XmlValue::Element {
+                name,
+                attributes,
+                namespace,
+                children,
+              });
+            }
+            _ => children.push(XmlValue::deserialize(reader)?),
+          }
+        }
+      }
+      xml::reader::XmlEvent::CData(_) => todo!(),
+      xml::reader::XmlEvent::Comment(_) => todo!(),
+      xml::reader::XmlEvent::Characters(_) => todo!(),
+      xml::reader::XmlEvent::Whitespace(_) => todo!(),
+      xml::reader::XmlEvent::StartDocument { .. }
+      | xml::reader::XmlEvent::EndDocument
+      | xml::reader::XmlEvent::ProcessingInstruction { .. }
+      | xml::reader::XmlEvent::EndElement { .. } => Err("Unexpected event.".to_string()),
+    }
+  }
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! test_for_type {
