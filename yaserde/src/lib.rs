@@ -370,6 +370,11 @@ impl YaSerialize for XmlValue {
 
 impl YaDeserialize for XmlValue {
   fn deserialize<R: Read>(reader: &mut de::Deserializer<R>) -> Result<Self, String> {
+    // Skip to next non-whitespace event
+    while let xml::reader::XmlEvent::Whitespace(_) = reader.peek()? {
+      reader.next_event()?;
+    }
+
     match reader.next_event()? {
       xml::reader::XmlEvent::StartElement {
         name,
@@ -392,10 +397,10 @@ impl YaDeserialize for XmlValue {
           }
         }
       }
-      xml::reader::XmlEvent::CData(_) => todo!(),
-      xml::reader::XmlEvent::Comment(_) => todo!(),
-      xml::reader::XmlEvent::Characters(_) => todo!(),
-      xml::reader::XmlEvent::Whitespace(_) => todo!(),
+      xml::reader::XmlEvent::CData(characters) => Ok(XmlValue::CData(characters)),
+      xml::reader::XmlEvent::Comment(characters) => Ok(XmlValue::Comment(characters)),
+      xml::reader::XmlEvent::Characters(characters) => Ok(Self::Characters(characters)),
+      xml::reader::XmlEvent::Whitespace(_) => unreachable!("Unexpected whitespace. Should not be possible here since we should have skipped all to a non-whitespace element."),
       xml::reader::XmlEvent::StartDocument { .. }
       | xml::reader::XmlEvent::EndDocument
       | xml::reader::XmlEvent::ProcessingInstruction { .. }
@@ -474,4 +479,45 @@ macro_rules! serialize_and_validate {
       Ok(content.split("\n").map(|s| s.trim()).collect::<String>())
     );
   };
+}
+
+#[cfg(test)]
+mod tests {
+  use super::XmlValue;
+
+  #[test]
+  fn test_xml_value() {
+    let xml = r#"<data><item>value</item></data>"#;
+    let model = XmlValue::Element {
+      name: "data".parse().unwrap(),
+      attributes: vec![],
+      // By default, the namespace of the reader includes some default namespaces defined in `NamespaceStack::default()NamespaceStack::default()`. Thus, the test, to get equality, must include the same namespaces.
+      namespace: xml::namespace::NamespaceStack::default().pop(),
+      children: vec![XmlValue::Element {
+        name: "item".parse().unwrap(),
+        attributes: vec![],
+        // See above namespace comment
+        namespace: xml::namespace::NamespaceStack::default().pop(),
+        children: vec![XmlValue::Characters("value".to_string())],
+      }],
+    };
+
+    let data: Result<String, String> = super::ser::to_string_with_config(
+      &model,
+      &super::ser::Config {
+        perform_indent: false,
+        write_document_declaration: false,
+        ..Default::default()
+      },
+    );
+    assert_eq!(data, Ok(xml.to_string()), "Failed to serialize correctly");
+
+    let loaded: Result<XmlValue, String> = super::de::from_str(xml);
+    assert_eq!(
+      loaded,
+      Ok(model),
+      "Failed to deserialize correctly. Result is {:?}",
+      loaded
+    );
+  }
 }
