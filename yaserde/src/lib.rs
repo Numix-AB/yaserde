@@ -216,6 +216,32 @@ serialize_type!(i64);
 serialize_type!(f32);
 serialize_type!(f64);
 
+impl<T: YaSerialize> YaSerialize for Box<T> {
+  fn serialize<W: Write>(&self, writer: &mut ser::Serializer<W>) -> Result<(), String> {
+    (**self).serialize(writer)
+  }
+
+  fn serialize_attributes(
+    &self,
+    attributes: Vec<xml::attribute::OwnedAttribute>,
+    namespace: xml::namespace::Namespace,
+  ) -> Result<
+    (
+      Vec<xml::attribute::OwnedAttribute>,
+      xml::namespace::Namespace,
+    ),
+    String,
+  > {
+    (**self).serialize_attributes(attributes, namespace)
+  }
+}
+
+impl<T: YaDeserialize> YaDeserialize for Box<T> {
+  fn deserialize<R: Read>(reader: &mut de::Deserializer<R>) -> Result<Self, String> {
+    Ok(Box::new(T::deserialize(reader)?))
+  }
+}
+
 /// Re-export for use in yaserde_derive
 #[doc(hidden)]
 pub use xml as __xml;
