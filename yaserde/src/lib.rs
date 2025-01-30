@@ -303,6 +303,32 @@ pub enum XmlValue {
   Characters(String),
 }
 
+impl XmlValue {
+  pub fn is_element(&self) -> bool {
+    matches!(self, XmlValue::Element { .. })
+  }
+
+  pub fn is_cdata(&self) -> bool {
+    matches!(self, XmlValue::CData(_))
+  }
+
+  pub fn is_comment(&self) -> bool {
+    matches!(self, XmlValue::Comment(_))
+  }
+
+  pub fn is_characters(&self) -> bool {
+    matches!(self, XmlValue::Characters(_))
+  }
+
+  pub fn as_str(&self) -> Option<&str> {
+    match self {
+      XmlValue::CData(content) => Some(content),
+      XmlValue::Characters(content) => Some(content),
+      _ => None,
+    }
+  }
+}
+
 impl YaSerialize for XmlValue {
   fn serialize<W: Write>(&self, writer: &mut ser::Serializer<W>) -> Result<(), String> {
     match self {
@@ -403,10 +429,20 @@ impl YaDeserialize for XmlValue {
             }
             _ => {
               let child = XmlValue::deserialize(reader)?;
-              let xml::reader::XmlEvent::EndElement { ..
-              } = reader.next_event()? else {
-                unreachable!("We just peeked and it should be an end element event.");
-              };
+              if let XmlValue::Element { name: start_name, .. } = &child {
+                let xml::reader::XmlEvent::EndElement { name
+                } = reader.next_event()? else {
+                  unreachable!("We just peeked and it should be an end element event.");
+                };
+
+                if start_name.local_name != name.local_name {
+                  return Err("Mismatched start and end element names.".to_string());
+                }
+
+                if start_name.prefix_ref() != name.prefix_ref() {
+                  return Err("Mismatched start and end element prefixes.".to_string());
+                }
+              }
               
               children.push(child)
             },
@@ -499,11 +535,13 @@ macro_rules! serialize_and_validate {
 
 #[cfg(test)]
 mod tests {
+  use xml::{attribute::OwnedAttribute, name::OwnedName};
+
   use super::XmlValue;
 
   #[test]
   fn test_xml_value() {
-    let xml = r#"<data><item>value</item></data>"#;
+    let xml = r#"<data><item test="a">value</item></data>"#;
     let model = XmlValue::Element {
       name: "data".parse().unwrap(),
       attributes: vec![],
@@ -511,7 +549,10 @@ mod tests {
       namespace: xml::namespace::NamespaceStack::default().pop(),
       children: vec![XmlValue::Element {
         name: "item".parse().unwrap(),
-        attributes: vec![],
+        attributes: vec![OwnedAttribute {
+          name: OwnedName::local("test"),
+          value: "a".to_owned(),
+        }],
         // See above namespace comment
         namespace: xml::namespace::NamespaceStack::default().pop(),
         children: vec![XmlValue::Characters("value".to_string())],
