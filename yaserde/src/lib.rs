@@ -372,7 +372,9 @@ impl YaDeserialize for XmlValue {
   fn deserialize<R: Read>(reader: &mut de::Deserializer<R>) -> Result<Self, String> {
     // Skip to next non-whitespace event
     while let xml::reader::XmlEvent::Whitespace(_) = reader.peek()? {
-      reader.next_event()?;
+      let xml::reader::XmlEvent::Whitespace(_) = reader.next_event()? else {
+        unreachable!("We just peeked and it should be a whitespace event.");
+      };
     }
 
     match reader.next_event()? {
@@ -384,8 +386,14 @@ impl YaDeserialize for XmlValue {
         let mut children = Vec::new();
         loop {
           match reader.peek()? {
-            xml::reader::XmlEvent::EndElement { .. } => {
-              reader.next_event()?;
+            xml::reader::XmlEvent::EndElement { name: end_name } => {
+              if name.local_name != end_name.local_name {
+                return Err("Mismatched start and end element names.".to_string());
+              }
+              if name.prefix_ref() != end_name.prefix_ref() {
+                return Err("Mismatched start and end element prefixes.".to_string());
+              }
+
               break Ok(XmlValue::Element {
                 name,
                 attributes,
@@ -393,7 +401,15 @@ impl YaDeserialize for XmlValue {
                 children,
               });
             }
-            _ => children.push(XmlValue::deserialize(reader)?),
+            _ => {
+              let child = XmlValue::deserialize(reader)?;
+              let xml::reader::XmlEvent::EndElement { ..
+              } = reader.next_event()? else {
+                unreachable!("We just peeked and it should be an end element event.");
+              };
+              
+              children.push(child)
+            },
           }
         }
       }
